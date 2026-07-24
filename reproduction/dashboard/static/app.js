@@ -119,6 +119,43 @@ function renderEvents(events) {
     <strong>${e.event.replaceAll("_"," ").toUpperCase()}</strong><p>${e.detail||e.level}</p></div>`).join("");
 }
 
+function duration(seconds) {
+  const days=Math.floor(seconds/86400);
+  const hours=Math.floor((seconds%86400)/3600);
+  const minutes=Math.floor((seconds%3600)/60);
+  const secs=seconds%60;
+  return [days&&`${days}天`, (days||hours)&&`${hours}时`, `${minutes}分`, `${secs}秒`].filter(Boolean).join(" ");
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function renderTraining(training) {
+  const active=training.active_count;
+  const badge=$("#trainingStatus");
+  const hasFailure=training.failed_count>0;
+  badge.textContent=active ? `${active} 个模型训练中` : hasFailure ? `${training.failed_count} 个异常` : "当前无训练";
+  badge.className=`status-pill ${active?"ok":hasFailure?"fail":""}`;
+  $("#trainingSummary").textContent=`训练日志口径 · 已完成 ${training.completed_count}/5 · 每分钟自动刷新`;
+  const labels={running:"训练中",completed:"已完成",failed:"失败",interrupted:"异常中断",pending:"等待"};
+  const classes={running:"ok",completed:"ok",failed:"fail",interrupted:"fail",pending:""};
+  $("#trainingRows").innerHTML=training.models.map(p=>{
+    const progress=Math.min(100, p.task_total ? p.task_current/p.task_total*100 : 0);
+    const resource=p.pid
+      ? `PID ${p.pid} · ${duration(p.elapsed_seconds)} · CPU ${fmt(p.cpu_percent,1)}% · MEM ${fmt(p.memory_percent,1)}%`
+      : "—";
+    return `<tr>
+      <td><b>${escapeHtml(p.model)}</b></td>
+      <td><span class="status-pill ${classes[p.state]}">${labels[p.state]}</span></td>
+      <td><div class="task-progress"><div style="width:${progress}%"></div></div><small>${p.task_current}/${p.task_total}</small></td>
+      <td class="training-detail" title="${escapeHtml(p.detail)}">${escapeHtml(p.detail)}<small>${p.log_updated_utc?chinaTime(p.log_updated_utc)+" GMT+8":"—"}</small></td>
+      <td>${p.started_utc?chinaTime(p.started_utc)+" GMT+8":"—"}</td>
+      <td class="training-resource">${resource}</td>
+    </tr>`;
+  }).join("");
+}
+
 function valuePct(value) {
   return value == null ? "—" : pct(value);
 }
@@ -137,14 +174,36 @@ function renderReview(kind=REVIEW_KIND) {
   ] : [];
   $("#reviewKpis").innerHTML=cards.map(x=>`<div><label>${x[0]}</label><strong>${x[1]}</strong></div>`).join("");
   const rows=review.daily.filter(x=>x.kind===kind && x.top_n===10).reverse();
-  $("#reviewRows").innerHTML=rows.map(r=>`<tr>
+  $("#reviewRows").innerHTML=rows.map((r,rowIndex)=>`<tr class="review-summary-row" data-review-row="${rowIndex}">
     <td>${r.date}</td><td>${r.outcome_date || "—"}</td><td>Top${r.top_n}</td>
     <td>${r.realized_count}/${r.selected_count}</td><td>${valuePct(r.stock_win_rate)}</td>
     <td class="${r.average_return>0?"positive":r.average_return<0?"negative":""}">${valuePct(r.average_return)}</td>
     <td>${valuePct(r.benchmark_return)}</td>
     <td class="${r.excess_return>0?"positive":r.excess_return<0?"negative":""}">${valuePct(r.excess_return)}</td>
     <td><span class="status-pill ${r.status==="realized"?"ok":"warn"}">${r.status==="realized"?"已复盘":"待复盘"}</span></td>
+    <td><button class="detail-button" data-review-detail="${rowIndex}" aria-expanded="false">查看</button></td>
+  </tr><tr class="review-detail-row" data-review-detail-row="${rowIndex}" hidden>
+    <td colspan="10"><div class="stock-detail">
+      <div class="stock-detail-head"><b>${r.date} · ${kind==="filtered"?"过滤后":"原始信号"} Top${r.top_n}</b><span>收益区间 ${r.outcome_date ? `${r.date} 后首个交易日收盘 → ${r.outcome_date} 收盘` : "尚未形成"}</span></div>
+      <div class="table-wrap"><table class="stock-detail-table">
+        <thead><tr><th>排名</th><th>股票</th><th>代码</th><th>预测分</th><th>看涨模型占比</th><th>实际收益</th><th>结果</th></tr></thead>
+        <tbody>${(r.stocks || []).map(s=>`<tr>
+          <td>${s.rank}</td><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.instrument)}</td>
+          <td>${s.avg_score==null?"—":fmt(s.avg_score,4)}</td><td>${valuePct(s.pos_ratio)}</td>
+          <td class="${s.return>0?"positive":s.return<0?"negative":""}">${valuePct(s.return)}</td>
+          <td>${s.return==null?"待复盘":s.return>0?"盈利":s.return<0?"亏损":"持平"}</td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </div></td>
   </tr>`).join("");
+  document.querySelectorAll("[data-review-row]").forEach(row=>row.addEventListener("click",()=>{
+    const button=row.querySelector("[data-review-detail]");
+    const detail=document.querySelector(`[data-review-detail-row="${row.dataset.reviewRow}"]`);
+    const opening=detail.hidden;
+    detail.hidden=!opening;
+    button.textContent=opening?"收起":"查看";
+    button.setAttribute("aria-expanded",String(opening));
+  }));
 }
 
 async function load(showToast=false) {
@@ -153,7 +212,7 @@ async function load(showToast=false) {
     DATA=await res.json(); const s=DATA.summary;
     $("#predictionDate").textContent=s.prediction_date;
     $("#updatedAt").textContent=`流水线完成于 ${chinaTime(DATA.pipeline.last_success_utc)} GMT+8`;
-    renderKpis(DATA); renderLiveData(DATA); renderChart(DATA.metrics, DATA.selected); renderWeights(DATA.selected); renderStocks(); renderLineage(s); renderReview(); renderEvents(DATA.events);
+    renderKpis(DATA); renderLiveData(DATA); renderChart(DATA.metrics, DATA.selected); renderWeights(DATA.selected); renderStocks(); renderLineage(s); renderReview(); renderTraining(DATA.training); renderEvents(DATA.events);
     if(showToast){ $("#toast").textContent="数据已刷新"; $("#toast").className="show"; setTimeout(()=>$("#toast").classList.remove("show"),1800); }
   } catch(e) { $("#toast").textContent=`加载失败：${e.message}`; $("#toast").className="show fail"; }
 }

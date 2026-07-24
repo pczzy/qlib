@@ -9,12 +9,12 @@ stock_pool: csi300
 step: 60
 rolling_type: custom
 predict_dates:
-- start: '2026-07-23'
-  end: '2026-07-23'
+- start: '2026-07-24'
+  end: '2026-07-24'
 model_filter:
 - ^REPRO_
 rec_filter:
 - ic: 0.001
 - icir: 0.001
 - rankic: 0.001
-- rankicir: 0.001
+- rankicir: 0.10

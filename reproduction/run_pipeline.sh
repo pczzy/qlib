@@ -203,6 +203,12 @@ if $changed || [ ! -f "$old_selection/total.csv" ]; then
 else
   json_log info selection_skipped "existing_result=$selection_dir"
 fi
+"$PY" "$ROOT/robust_ensemble.py" \
+  --selection-dir "$selection_dir" \
+  --metrics "$ROOT/evidence/final-audit/model_metrics.csv" \
+  --config "$CONFIG" >>"$RAW_LOG" 2>&1 ||
+  fail robust_ensemble_failed 74
+json_log info robust_ensemble_complete "$selection_dir"
 
 "$PY" "$ROOT/pipeline_helpers.py" write-state "$STATE" \
   --sha256 "$sha" --mtime "$mtime" --latest-date "$latest" \

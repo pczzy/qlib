@@ -134,7 +134,7 @@
         <div class="review-kpis" id="reviewKpis"></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>预测日</th><th>结果日</th><th>组合</th><th>样本</th><th>个股胜率</th><th>平均收益</th><th>沪深300</th><th>超额收益</th><th>状态</th></tr></thead>
+            <thead><tr><th>预测日</th><th>结果日</th><th>组合</th><th>样本</th><th>个股胜率</th><th>平均收益</th><th>沪深300</th><th>超额收益</th><th>状态</th><th>明细</th></tr></thead>
             <tbody id="reviewRows"></tbody>
           </table>
         </div>
@@ -142,7 +142,21 @@
 
       <article class="panel span-12">
         <div class="panel-head">
-          <div><span class="section-no">06</span><h2>流水线事件</h2></div>
+          <div><span class="section-no">06</span><h2>模型训练进程</h2></div>
+          <span id="trainingStatus" class="status-pill">—</span>
+        </div>
+        <div class="training-summary" id="trainingSummary"></div>
+        <div class="table-wrap">
+          <table class="training-table">
+            <thead><tr><th>模型</th><th>状态</th><th>训练任务进度</th><th>最新日志</th><th>开始时间</th><th>资源</th></tr></thead>
+            <tbody id="trainingRows"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel span-12">
+        <div class="panel-head">
+          <div><span class="section-no">07</span><h2>流水线事件</h2></div>
           <span class="tag">最近一次运行</span>
         </div>
         <div class="events" id="events"></div>

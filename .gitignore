@@ -55,6 +55,7 @@ reproduction/review_csv/
 reproduction/backtest_csv/
 reproduction/qlibAssistant/page/docs/public/backtest_csv/
 reproduction/qlibAssistant/page/docs/public/data/
+reproduction/dashboard/.dashboard.env
 
 # Generic serialized model/checkpoint formats
 *.pkl

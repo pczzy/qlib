@@ -22,7 +22,9 @@
 
 ## 分数是什么意思？
 
-**预测分数（avg_score）**：基于当天收盘数据，预测「明天收盘买、后天收盘卖」的期望收益率。
+**预测分数（avg_score）**：各模型先按当天 CSI300 横截面转换为
+`[-0.5, 0.5]` 的百分位排名分，再进行稳健加权；分数越高代表相对排名越靠前，
+不应直接当作预期收益率。
 
 - 分数越高，模型越看好
 - `pos_ratio`：有多少个模型预测正收益，如 0.875 表示 8 个模型里 7 个看涨
@@ -52,7 +54,7 @@ graph LR
 - **数据**：自动从 [chenditc/investment_data](https://github.com/chenditc/investment_data) 拉取最新 A 股数据
 - **训练**：XGBoost、LightGBM、DoubleEnsemble、Linear，滚动 1～5 年历史
 - **筛选**：按 IC、ICIR、Rank IC 等指标筛出表现较好的模型, 并给出权重
-- **预测**：多模型加权平均分数，生成 `xxx_ret`、`xxx_filter_ret` 汇总表
+- **预测**：多模型横截面排名标准化后稳健加权，生成 `xxx_ret`、`xxx_filter_ret` 汇总表
 
 > 自动调度可能排队，实际执行可能延后。
 

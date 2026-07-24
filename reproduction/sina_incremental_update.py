@@ -28,6 +28,7 @@ from py_mini_racer import MiniRacer
 
 FIELDS = ("open", "high", "low", "close", "volume", "amount", "vwap", "factor", "adjclose", "change")
 PRICE_FIELDS = ("open", "high", "low", "close")
+BENCHMARK_SYMBOL = "sh000300"
 SINA_HIST = "https://finance.sina.com.cn/realstock/company/{symbol}/hisdata_klc2/klc_kl.js"
 SINA_HFQ = "https://finance.sina.com.cn/realstock/company/{symbol}/hfq.js"
 
@@ -86,6 +87,25 @@ def current_constituents(provider: Path, day: str) -> list[str]:
     if len(result) != 300:
         raise RuntimeError(f"expected 300 CSI300 constituents at {day}, got {len(result)}")
     return sorted(result)
+
+
+def extend_instrument_end(stage: Path, symbol_to_extend: str, new_last: str) -> int:
+    """Extend one instrument in the all-instruments registry."""
+    path = stage / "instruments/all.txt"
+    output = []
+    changed = 0
+    for line in path.read_text().splitlines():
+        symbol, start, end = line.split("\t")
+        if symbol.lower() == symbol_to_extend.lower() and end < new_last:
+            end = new_last
+            changed += 1
+        output.append("\t".join((symbol, start, end)))
+    atomic_write_text(path, "\n".join(output) + "\n")
+    if changed != 1:
+        raise RuntimeError(
+            f"expected to extend {symbol_to_extend} once in all.txt, extended {changed}"
+        )
+    return changed
 
 
 def read_value(provider: Path, symbol: str, field: str, day: str, calendar: list[str]) -> float:
@@ -334,6 +354,7 @@ def build_stage(provider: Path, stage: Path, stocks: dict[str, SinaStock], symbo
 
     atomic_write_text(calendar_path, "\n".join(calendar + dates) + "\n")
     extended = extend_csi300(stage, old_last, dates[-1])
+    benchmark_extended = extend_instrument_end(stage, BENCHMARK_SYMBOL, dates[-1])
     atomic_write_text(
         stage / "sina_incremental.json",
         json.dumps(
@@ -349,7 +370,64 @@ def build_stage(provider: Path, stage: Path, stocks: dict[str, SinaStock], symbo
         )
         + "\n",
     )
-    return {"symbols": len(symbols), "dates": dates, "missing_bars": missing, "corporate_actions": action_symbols, "extended_intervals": extended}
+    return {
+        "symbols": len(symbols),
+        "dates": dates,
+        "missing_bars": missing,
+        "corporate_actions": action_symbols,
+        "extended_intervals": extended,
+        "benchmark_intervals_extended": benchmark_extended,
+    }
+
+
+def build_benchmark_repair_stage(
+    provider: Path, stage: Path, stock: SinaStock
+) -> dict:
+    """Backfill a benchmark tail when older updater versions extended only stocks."""
+    if stage.exists():
+        raise FileExistsError(stage)
+    calendar = (provider / "calendars/day.txt").read_text().splitlines()
+    close_path = provider / "features" / BENCHMARK_SYMBOL / "close.day.bin"
+    close_values = np.fromfile(close_path, dtype="<f4")
+    start = int(close_values[0])
+    last_index = start + len(close_values) - 2
+    missing_dates = calendar[last_index + 1 :]
+    if not missing_dates:
+        raise RuntimeError(f"{BENCHMARK_SYMBOL} has no missing calendar tail")
+    calibration_day = calendar[last_index]
+    if calibration_day not in stock.bars:
+        raise RuntimeError(
+            f"benchmark calibration bar missing on {calibration_day}"
+        )
+    if any(day not in stock.bars for day in missing_dates):
+        raise RuntimeError(f"benchmark bars missing for tail {missing_dates}")
+
+    shutil.copytree(provider, stage, copy_function=os.link)
+    qlib_cal = {
+        field: read_value(provider, BENCHMARK_SYMBOL, field, calibration_day, calendar)
+        for field in FIELDS
+    }
+    generated_by_day = {
+        day: generated_values(stock, day, calibration_day, qlib_cal)
+        for day in missing_dates
+    }
+    previous_close = stock.bars[calibration_day]["close"]
+    for day in missing_dates:
+        generated_by_day[day]["change"] = stock.bars[day]["close"] / previous_close - 1.0
+        previous_close = stock.bars[day]["close"]
+    new_indexes = list(range(last_index + 1, len(calendar)))
+    for field in FIELDS:
+        append_bin(
+            stage / "features" / BENCHMARK_SYMBOL / f"{field}.day.bin",
+            new_indexes,
+            [generated_by_day[day][field] for day in missing_dates],
+        )
+    extended = extend_instrument_end(stage, BENCHMARK_SYMBOL, missing_dates[-1])
+    return {
+        "symbol": BENCHMARK_SYMBOL,
+        "dates": missing_dates,
+        "benchmark_intervals_extended": extended,
+    }
 
 
 def verify_stage(stage: Path, symbols: list[str], dates: list[str]) -> dict:
@@ -368,13 +446,28 @@ def verify_stage(stage: Path, symbols: list[str], dates: list[str]) -> dict:
     finite_close = int(frame["$close"].notna().sum())
     finite_rows = int(frame.notna().all(axis=1).sum())
     active_last = D.list_instruments(D.instruments("csi300"), start_time=dates[-1], end_time=dates[-1], as_list=True)
+    benchmark_last = D.features(
+        [BENCHMARK_SYMBOL.upper()],
+        ["$close"],
+        start_time=dates[-1],
+        end_time=dates[-1],
+        freq="day",
+    )
+    benchmark_finite = int(benchmark_last["$close"].notna().sum())
     return {
         "rows": len(frame),
         "expected_rows": expected,
         "finite_close": finite_close,
         "fully_finite_rows": finite_rows,
         "csi300_last_day": len(active_last),
-        "passed": len(frame) == expected and finite_close >= expected - 5 and finite_rows >= expected - 5 and len(active_last) == 300,
+        "benchmark_last_day": benchmark_finite,
+        "passed": (
+            len(frame) == expected
+            and finite_close >= expected - 5
+            and finite_rows >= expected - 5
+            and len(active_last) == 300
+            and benchmark_finite == 1
+        ),
     }
 
 
@@ -388,11 +481,39 @@ def main() -> int:
     parser.add_argument("--stage", type=Path)
     parser.add_argument("--workers", type=int, default=12)
     parser.add_argument("--report", type=Path)
+    parser.add_argument(
+        "--repair-benchmark",
+        action="store_true",
+        help="backfill an SH000300 tail left by an older stock-only update",
+    )
     args = parser.parse_args()
 
     started = time.monotonic()
     calendar = (args.provider / "calendars/day.txt").read_text().splitlines()
+    if args.repair_benchmark:
+        if args.stage is None:
+            parser.error("--stage is required with --repair-benchmark")
+        stock = fetch_stock(BENCHMARK_SYMBOL)
+        report = {
+            "source": "sina-direct-no-proxy",
+            "provider": str(args.provider),
+            "repair": build_benchmark_repair_stage(args.provider, args.stage, stock),
+        }
+        dates = report["repair"]["dates"]
+        verification = verify_stage(args.stage, [BENCHMARK_SYMBOL], dates)
+        report["stage_verification"] = verification
+        report["passed"] = verification["passed"]
+        report["elapsed_seconds"] = round(time.monotonic() - started, 3)
+        rendered = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
+        print(rendered)
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(rendered + "\n")
+        return 0 if report["passed"] else 1
     symbols = current_constituents(args.provider, calendar[-1])
+    # The dashboard compares stock selections with SH000300.  Keep the index in
+    # the same validated incremental batch instead of extending only constituents.
+    symbols.append(BENCHMARK_SYMBOL)
     discovery = None
     if args.auto:
         args.append, discovery = discover_dates(symbols, calendar[-1], args.workers)

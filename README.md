@@ -42,7 +42,8 @@ reproduction/dashboard/start.sh
 默认监听 `0.0.0.0:8765`，页面实时读取 `evidence/results` 和流水线状态，
 包含历史预测复盘、Top 10 胜率和收益统计，每分钟自动刷新；也可通过
 `PORT=9000 reproduction/dashboard/start.sh`
-指定其他端口。
+指定其他端口。仪表盘使用 HTTP Basic 认证，凭据摘要保存在不纳入 Git 的
+`reproduction/dashboard/.dashboard.env`。
 
 手工启动一次完整检查：
 
@@ -168,6 +169,11 @@ reproduction/venv/bin/python reproduction/build_result_evidence.py
 5. `real_label_non_null`。预测日尚无未来收益时为 0 属于正常情况；
 6. `model_audit.json` 中 `success` 是否为 `true`。
 7. `model_train_end`、`model_test_end` 和两个数据包 SHA256 是否符合预期。
+
+选股集成会先把每个模型的当日分数转换为横截面百分位排名，消除不同算法
+输出尺度不一致造成的隐性权重；仅保留满足配置指标门槛的模型，再以
+Rank IC 权重与等权各占一半进行收缩集成。每次结果的实际方法、门槛和权重
+记录在选股目录的 `ensemble_metadata.json`。
 
 本自动化只生成本地日报文件，不发送邮件、消息或外部通知。如需对外发送，
 应先单独确认接收方、凭据管理和数据合规要求。

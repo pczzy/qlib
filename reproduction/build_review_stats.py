@@ -110,6 +110,23 @@ def main() -> None:
                 average = realized.mean() if len(realized) else np.nan
                 stock_win_rate = (realized > 0).mean() if len(realized) else np.nan
                 benchmark_return = benchmark_map.get(("SH000300", pd.Timestamp(date)), np.nan)
+                stocks = []
+                for rank, (_, stock) in enumerate(picked.iterrows(), start=1):
+                    name = stock.get("name")
+                    stocks.append(
+                        {
+                            "rank": rank,
+                            "instrument": str(stock["instrument"]),
+                            "name": (
+                                str(name)
+                                if name is not None and not pd.isna(name)
+                                else str(stock["instrument"])
+                            ),
+                            "avg_score": safe_float(stock.get("avg_score")),
+                            "pos_ratio": safe_float(stock.get("pos_ratio")),
+                            "return": safe_float(stock.get("real_label")),
+                        }
+                    )
                 rows.append(
                     {
                         "date": date,
@@ -124,6 +141,7 @@ def main() -> None:
                         "average_return": safe_float(average),
                         "benchmark_return": safe_float(benchmark_return),
                         "excess_return": safe_float(average - benchmark_return),
+                        "stocks": stocks,
                     }
                 )
 
