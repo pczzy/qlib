@@ -1,0 +1,87 @@
+# Python caches and environments
+**/__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+reproduction/venv/
+
+# Editors and operating-system metadata
+.DS_Store
+.idea/
+.vscode/
+*~
+*.swp
+
+# Logs, locks, PIDs, and runtime state
+*.log
+*.pid
+*.lock
+reproduction/logs/
+reproduction/state/
+reproduction/status/
+reproduction/quarantine/
+reproduction/dashboard/dashboard.log
+reproduction/dashboard/dashboard.pid
+
+# Market data and downloaded archives
+reproduction/data/
+reproduction/data.*/
+reproduction/data-*/
+reproduction/data_*/
+reproduction/*.tar
+reproduction/*.tar.gz
+reproduction/*.tgz
+reproduction/*.zip
+data0/
+
+# Trained models, experiment artifacts, and generated analysis
+reproduction/mlruns/
+reproduction/analysis/
+reproduction/evidence/
+reproduction/catboost_info/
+/catboost_info/
+reproduction/qlibAssistant/model_pkl/
+reproduction/qlibAssistant/qlib_score_csv/
+reproduction/qlibAssistant/review_csv/
+reproduction/qlibAssistant/backtest_csv/
+reproduction/qlib_score_csv/
+reproduction/review_csv/
+reproduction/backtest_csv/
+reproduction/qlibAssistant/page/docs/public/backtest_csv/
+reproduction/qlibAssistant/page/docs/public/data/
+
+# Generic serialized model/checkpoint formats
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.cbm
+*.bin
+
+# Generated frontend dependencies and build output
+**/node_modules/
+**/.vitepress/cache/
+**/.vitepress/dist/
+**/dist/
+**/build/
+
+# Local screenshots and scratch files
+/perf.png
+/proxy.sh
+
+# Secrets and local environment overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json

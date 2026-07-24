@@ -1,0 +1,112 @@
+/* 侧边栏收起状态 - 使用 display:none 确保完全隐藏 */
+@media (min-width: 960px) {
+  html.sidebar-collapsed .VPSidebar {
+    display: none !important;
+  }
+  html.sidebar-collapsed .VPContent.has-sidebar {
+    padding-left: 32px !important;
+  }
+  html.sidebar-collapsed .VPNavBar.has-sidebar .title {
+    padding-left: 16px !important;
+    width: auto !important;
+  }
+  html.sidebar-collapsed .VPNavBar.has-sidebar .content,
+  html.sidebar-collapsed .VPNavBar.has-sidebar .divider {
+    padding-left: 16px !important;
+  }
+  html.sidebar-collapsed .VPLocalNav.has-sidebar {
+    padding-left: 16px !important;
+  }
+}
+
+/* 强制显示页脚（与侧边栏同时显示） */
+footer.VPFooter {
+  display: block !important;
+}
+
+/* 流体布局：随窗口宽度自适应，避免最大化时变形 */
+:root {
+  --vp-layout-max-width: 2560px;
+  --vp-sidebar-width: 300px;
+}
+
+/* 主内容区占满可用空间 */
+.VPDoc .container {
+  max-width: none !important;
+}
+
+.VPDoc .content,
+.VPDoc .content-container,
+.VPDoc.has-aside .content-container {
+  max-width: none !important;
+}
+
+/* 侧边栏贴靠最左侧 */
+@media (min-width: 1440px) {
+  .VPSidebar {
+    padding-left: 16px;
+    width: var(--vp-sidebar-width) !important;
+  }
+}
+
+.VPSidebar .nav {
+  overflow-x: hidden;
+  overflow-wrap: break-word;
+}
+
+.VPSidebarItem .text {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+@media (min-width: 960px) {
+  .VPContent.has-sidebar {
+    padding-left: var(--vp-sidebar-width) !important;
+    padding-right: 32px !important;
+  }
+}
+
+@media (min-width: 1440px) {
+  .VPNavBar.has-sidebar .title {
+    padding-left: 16px;
+    width: var(--vp-sidebar-width) !important;
+  }
+  .VPNavBar.has-sidebar .content,
+  .VPNavBar.has-sidebar .divider {
+    padding-left: var(--vp-sidebar-width) !important;
+    padding-right: 32px !important;
+  }
+}
+
+.VPLocalNav.has-sidebar {
+  padding-left: var(--vp-sidebar-width) !important;
+  padding-right: 32px !important;
+}
+
+/* 表格横向滚动 */
+.vp-doc .md-table-wrapper {
+  overflow-x: auto;
+  width: 100%;
+}
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.vp-doc td,
+.vp-doc th {
+  min-width: 100px;
+  white-space: nowrap;
+  padding: 8px 12px;
+}
+
+.vp-doc th:first-child,
+.vp-doc td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--vp-c-bg);
+  border-right: 2px solid var(--vp-c-divider);
+}

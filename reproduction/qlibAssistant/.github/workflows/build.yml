@@ -1,0 +1,47 @@
+name: Build
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 1. 注入 Python 环境
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12' # 根据你的项目需求调整版本
+
+      # 2. 安装项目依赖和测试工具
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # 3. 运行 pytest 并生成 coverage.xml 报告
+      - name: Run tests with pytest
+        run: |
+          # --cov=. 表示计算当前目录下所有代码的覆盖率
+          # --cov-report=xml 必须生成 XML 格式，Sonar 才能识别
+          pytest --cov=. --cov-report=xml
+
+      # 4. 执行扫描并将报告路径传给 Sonar
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@0303d6b62e310685c0e34d0b9cde218036885c4d
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # 关键参数：通过 args 告诉 Sonar 覆盖率报告在哪里
+          args: >
+            -Dsonar.python.coverage.reportPaths=coverage.xml

@@ -1,0 +1,117 @@
+
+name: Review
+
+on:
+  workflow_run:
+    workflows: ["Analysis"] # 必须与第一个 Action 的 name 字段完全一致
+    types:
+      - completed
+
+  # 保留手动触发按钮，方便调试
+  workflow_dispatch:
+
+env:
+  DOLT_TOKEN: ${{ secrets.DOLT_TOKEN }}
+
+jobs:
+  check-home-access:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: 1. 下载最新qlib_bin.tar.gz
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 1. 下载名为 qlib_bin.tar.gz 的附件到当前目录
+          gh release download --repo chenditc/investment_data --pattern "qlib_bin.tar.gz"
+
+          # 2. 解压文件
+          echo ">>> 正在解压数据..."
+          mkdir -p ~/.qlib/qlib_data/cn_data
+
+          tar -zxf qlib_bin.tar.gz -C ~/.qlib/qlib_data/cn_data --strip-components=1
+          
+          # 3. 验证解压后的内容
+          tail -n1   ~/.qlib/qlib_data/cn_data/calendars/day.txt
+
+      - name: 2. Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main         # 显式指定拉取 main 分支
+          fetch-depth: 1    # 只拉取最新一次提交以节省时间
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # 建议使用 '3.12' 匹配最新稳定补丁，若强行指定不存在的版本会报错
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          else
+            echo "⚠️ 警告: 未找到 requirements.txt，跳过安装。"
+          fi
+
+      - name: 从 qlib_score 拉取数据
+        run: |
+          git fetch origin qlib_score
+          git checkout origin/qlib_score -- qlib_score_csv || mkdir -p qlib_score_csv
+          git restore --staged qlib_score_csv 2>/dev/null || true
+
+      - name: 5. Review
+        run: |
+          echo ">>> 运行分析脚本..."
+          cd ./roll && python ./roll.py model review
+          cd ..
+
+      - name: 回测分析与同步全部csv到dolt
+        run: |
+          echo ">>> 运行回测分析脚本..."
+          cd ./roll && python ./roll.py model backtest
+          cd ..
+
+          echo ">>> 调用脚本同步全部csv到 dolt..."
+          python ./script/sync_dolt.py push_all
+
+      - name: 提交 review_csv 和 backtest_csv 到 qlib_score 分支
+        run: |
+          echo ">>> 暂存 review_csv 和 backtest_csv 到临时目录..."
+          mkdir -p /tmp/review_results
+          mkdir -p /tmp/backtest_results
+          cp -r review_csv/* /tmp/review_results/ 2>/dev/null || true
+          cp -r backtest_csv/* /tmp/backtest_results/ 2>/dev/null || true
+
+          echo ">>> 清空 review_csv 与 backtest_csv 中的 csv（避免分支上残留旧文件）..."
+          mkdir -p review_csv backtest_csv
+          find review_csv backtest_csv -type f -iname '*.csv' -delete 2>/dev/null || true
+
+          echo ">>> 切换到 qlib_score 分支..."
+          git fetch origin
+          if git show-ref --quiet refs/remotes/origin/qlib_score; then
+            git checkout qlib_score
+            git pull origin qlib_score
+          else
+            git checkout -b qlib_score
+          fi
+
+          echo ">>> 更新 review_csv 和 backtest_csv 文件夹..."
+          mkdir -p review_csv
+          mkdir -p backtest_csv
+          cp -r /tmp/review_results/* review_csv/ 2>/dev/null || true
+          cp -r /tmp/backtest_results/* backtest_csv/ 2>/dev/null || true
+
+          git add -f review_csv/
+          git add -f backtest_csv/
+
+          # 检查是否有文件变化，避免空提交报错
+          if git diff --cached --quiet; then
+            echo "review_csv/backtest_csv 结果无变化，跳过推送。"
+          else
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "自动同步回测和复盘csv: $(date +'%Y-%m-%d %H:%M:%S')"
+            git push origin qlib_score
+          fi

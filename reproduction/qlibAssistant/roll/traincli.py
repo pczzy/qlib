@@ -1,0 +1,263 @@
+import copy
+from loguru import logger
+import sys
+import qlib
+from qlib.constant import REG_CN
+from qlib.workflow import R
+from qlib.config import C
+from qlib.workflow.task.gen import RollingGen, task_generator
+from qlib.workflow.task.manage import TaskManager, run_task
+from qlib.workflow.task.collect import RecorderCollector
+from qlib.model.ens.group import RollingGroup
+from qlib.model.trainer import TrainerR, TrainerRM, task_train
+from pathlib import Path
+from myconfig import get_my_config
+import os
+from pprint import pprint
+from datetime import datetime
+import gc
+import multiprocessing
+import json
+import tempfile
+from tqdm import tqdm
+from functools import partialmethod
+from utils import generate_qlib_segments, get_mlruns_dates, get_local_data_date
+
+REPRODUCTION_ROOT = Path(__file__).resolve().parents[2]
+if str(REPRODUCTION_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPRODUCTION_ROOT))
+from model_provenance import build_provenance, expected_fingerprint, utc_now
+
+tqdm.__init__ = partialmethod(tqdm.__init__, disable=True)
+
+from qlib.workflow.task.gen import handler_mod as default_handler_mod
+
+
+def _train_worker(task, exp_name, region=REG_CN, **kwargs):
+    """
+    这是子进程实际执行的函数。
+    """
+    try:
+        # 每个子进程重新初始化
+        uri_folder = kwargs["uri_folder"]
+        provider_uri = kwargs["provider_uri"]
+        exp_manager = C["exp_manager"]
+        exp_manager["kwargs"]["uri"] = "file:" + str(Path(uri_folder).expanduser())
+        logger.info(f"Experiment uri: {exp_manager['kwargs']['uri']}")
+        qlib.init(provider_uri=provider_uri, region=region, exp_manager=exp_manager)
+
+        # 打印 PID 方便观察
+        logger.info(f"🔵 [子进程 PID: {os.getpid()}] 开始训练...", flush=True)
+
+        # 实例化 Trainer 并开始训练
+        trainer = TrainerR(experiment_name=exp_name)
+        training_started = utc_now()
+        # TrainerR mutates parts of the in-memory task while fitting.  Compute
+        # the identity from the pristine task that Qlib persists as `task`, so
+        # later audits reproduce the exact same fingerprint.
+        provenance = build_provenance(task, provider_uri, started_utc=training_started)
+        recorders = trainer.train(task)
+        training_finished = utc_now()
+        provenance["training_finished_utc"] = training_finished
+        for recorder in recorders:
+            recorder.save_objects(training_provenance=provenance)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                json_path = Path(temp_dir) / "training_provenance.json"
+                json_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2) + "\n")
+                recorder.save_objects(local_path=str(json_path))
+            recorder.set_tags(
+                recorder_fingerprint_sha256=provenance["recorder_fingerprint_sha256"],
+                training_data_sha256=provenance["training_data_sha256"],
+                training_started_utc=training_started,
+                training_finished_utc=training_finished,
+            )
+
+        logger.info(f"🟢 [子进程 PID: {os.getpid()}] 训练完成，准备释放内存。", flush=True)
+        os._exit(0)  # 确保子进程正常退出，exitcode 0
+    except Exception as e:
+        # 捕获异常打印出来，并再次抛出以确保 exitcode 非 0
+        logger.info(f"🔴 [子进程 PID: {os.getpid()}] 训练出错: {e}", flush=True)
+        raise e
+
+def run_train_blocking(task, exp_name, region, **kwargs):
+    """
+    主进程调用的函数。
+    功能：启动子进程 -> 阻塞等待 -> 返回结果
+    """
+    # "spawn" 在 mac / linux 都能用
+    # "fork" 在 mac 上不安全（尤其涉及 qlib / numpy / torch）
+    multiprocessing.set_start_method("spawn", force=True)
+    # 1. 创建子进程，目标是上面的 _train_worker 函数
+    p = multiprocessing.Process(
+        target=_train_worker,
+        args=(task, exp_name, region),
+        kwargs=kwargs   # ✅ 正确传递
+    )
+    # 2. 启动子进程
+    p.start()
+
+    # 3. 【关键】阻塞主进程，直到子进程结束
+    # 此时主进程什么都不干，内存也不会增加，静静等待子进程销毁
+    p.join()
+
+    logger.info(f"子进程 PID: {p.pid} 已结束，退出代码: {p.exitcode}")
+    # 4. 判断子进程是正常结束还是报错挂了
+    if p.exitcode == 0:
+        return True  # 成功
+    else:
+        logger.info(f"⚠️ 任务失败，子进程退出代码: {p.exitcode}")
+        return False # 失败
+
+
+def my_enhanced_handler_mod(task, rg):
+    # 1. 先调用官方自带的逻辑，帮你处理 end_time 不够长的问题
+    default_handler_mod(task, rg)
+
+    # 2. 再加上你自己的逻辑，修复 fit_start_time 的占位符问题
+    # 获取当前滚动后的 train 时间段
+    train_start, train_end = task["dataset"]["kwargs"]["segments"]["train"]
+
+    # 获取 handler 配置
+    h_kwargs = task["dataset"]["kwargs"]["handler"]["kwargs"]
+
+    # 强制覆盖为真实日期
+    h_kwargs["fit_start_time"] = train_start
+    h_kwargs["fit_end_time"] = train_end
+
+class TrainCLI:
+    """
+    [子模块] 训练引擎: 负责滚动训练 (Rolling)
+    """
+    def __init__(
+        self,
+        step = 40,
+        region=REG_CN,
+        **kwargs
+    ):
+        uri_folder = kwargs["uri_folder"]
+        provider_uri = kwargs["provider_uri"]
+        self.region = region
+        self.step = step
+        self.kwargs = kwargs
+        exp_manager = C["exp_manager"]
+        exp_manager["kwargs"]["uri"] = "file:" + str(Path(uri_folder).expanduser())
+        logger.info(f"Experiment uri: {exp_manager['kwargs']['uri']}")
+        qlib.init(provider_uri=provider_uri, region=region, exp_manager=exp_manager)
+        model_name = kwargs["model_name"]
+        dataset_name = kwargs["dataset_name"]
+        stock_pool = kwargs["stock_pool"]
+        self.task_config = get_my_config(model_name, dataset_name, stock_pool)
+        rolling_type = kwargs["rolling_type"]
+        self.rolling_gen = RollingGen(step=step, rtype=rolling_type, ds_extra_mod_func=my_enhanced_handler_mod)
+
+    def start(self):
+        """开始自动滚动训练"""
+        logger.info(f"启动滚动训练... step={self.step}")
+        tasks = self.gen()
+        self.task_training(tasks)
+
+    def gen(self):
+        print("========== task_generating ==========")
+        tasks = task_generator(
+            tasks=self.task_config,
+            generators=self.rolling_gen,  # generate different date segments
+        )
+        pprint(tasks)
+        return tasks
+
+    def task_training(self, tasks):
+        print("========== task_training ==========")
+        task = tasks[0]
+        model_class = task["model"]["class"]
+        data_set = task["dataset"]["kwargs"]["handler"]["class"]
+
+        now = datetime.now()
+        time_str = now.strftime("%Y%m%d_%H")
+
+        pfx_name = self.kwargs['pfx_name']
+        sfx_name = self.kwargs['sfx_name']
+        stock_pool =  task["dataset"]['kwargs']['handler']['kwargs']['instruments']
+        step = self.step
+        rolling_type = self.kwargs["rolling_type"]
+        if rolling_type == "custom":
+            step = "0"
+
+        exp_name = f"{pfx_name}_{model_class}_{data_set}_{stock_pool}_{rolling_type}_step{step}_{sfx_name}_{time_str}"
+        print(f"Experiment name: {exp_name}")
+
+
+        ## 断点续训功能
+        exps = R.list_experiments()
+        for name in exps:
+            if name.rsplit('_', 2)[0] == exp_name.rsplit('_', 2)[0]:
+                exp_name = name
+
+        logger.info(f"Using experiment name: {exp_name}")
+        self.trainer = TrainerR(experiment_name=exp_name)
+
+        exp = R.get_exp(experiment_name=exp_name)
+        exp_train_time_segs_list = []
+        for rid in exp.list_recorders():
+            rec = exp.get_recorder(recorder_id=rid)
+            if not rec.list_artifacts():
+                continue
+            lista = rec.list_artifacts()
+            if "params.pkl" not in lista or "sig_analysis" not in lista:
+                continue
+
+            task = rec.load_object("task")
+            train_time_seg = task["dataset"]["kwargs"]["segments"]["train"]
+            try:
+                provenance = rec.load_object("training_provenance")
+                if provenance.get("recorder_fingerprint_sha256") != expected_fingerprint(task, self.kwargs["provider_uri"]):
+                    continue
+            except Exception:
+                continue
+            exp_train_time_segs_list.append(train_time_seg)
+
+        print(f"Already trained time segments in experiment: {len(exp_train_time_segs_list)}")
+
+        failed_segments = []
+        for idx, task in enumerate(tasks):
+            logger.info(f"----- Training task {idx + 1}/{len(tasks)} -----")
+            train_time_seg = task["dataset"]["kwargs"]["segments"]["train"]
+            print(f"Train time segment: {train_time_seg}")
+
+            if train_time_seg in exp_train_time_segs_list:
+                logger.info(f"Skipping training for segment {train_time_seg} as it already exists in the experiment.")
+                continue
+
+            if not run_train_blocking(task, exp_name, self.region, **self.kwargs):
+                failed_segments.append(train_time_seg)
+            gc.collect()
+
+        if failed_segments:
+            raise RuntimeError(
+                f"Training failed for {len(failed_segments)} segment(s): {failed_segments}"
+            )
+
+    def start_custom(self):
+        self.kwargs["rolling_type"] = "custom"
+        # Anchor every window to the last trading day that is actually present
+        # in the active provider.  Using datetime.now() creates a new (and often
+        # future/non-trading) cohort even when the data still ends earlier.
+        data_end = get_local_data_date(self.kwargs["provider_uri"])
+        tasks = []
+        for i in range(1, 6):
+            segments = generate_qlib_segments(
+                months_total=12 * i, end_date_str=data_end
+            )
+            _task = copy.deepcopy(self.task_config)
+            _task["dataset"]["kwargs"]["segments"] = segments
+            tasks.append(_task)
+        self.task_training(tasks)
+    
+    def need_train(self):
+        mlruns_dates = get_mlruns_dates()
+        print(f"mlruns_dates: {mlruns_dates}")
+        local_data_date = get_local_data_date(self.kwargs['provider_uri'])
+        print(f"local_data_date: {local_data_date}")
+    
+        max_mlruns_date = max(mlruns_dates)
+        
+        return max_mlruns_date < local_data_date

@@ -1,0 +1,56 @@
+name: 部署 VitePress 网页
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, qlib_score ]
+    paths:
+      - 'page/**'
+      - 'qlib_score_csv/**'
+  workflow_run:
+    workflows: ["Review"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: 检出 main 分支
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: 从 qlib_score 拉取 qlib_score_csv 和 backtest_csv 数据
+        run: |
+          git fetch origin qlib_score
+          git checkout origin/qlib_score -- qlib_score_csv || mkdir -p qlib_score_csv
+          git checkout origin/qlib_score -- backtest_csv || mkdir -p backtest_csv
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: page/package-lock.json
+
+      - name: 构建 VitePress
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+          GEN_PAGE_LIMIT: "25"
+        run: |
+          cd page
+          npm ci
+          npm run docs:build
+
+      - name: 部署到 GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./page/docs/.vitepress/dist
+          force_orphan: true

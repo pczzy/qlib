@@ -1,0 +1,16 @@
+{
+  "name": "qlib-score-docs",
+  "version": "1.0.0",
+  "description": "qlib csi300 score 静态文档站",
+  "type": "module",
+  "scripts": {
+    "gen": "python script/gen_page.py",
+    "docs:dev": "npm run gen && vitepress dev docs",
+    "docs:build": "npm run gen && vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "lightweight-charts": "^5.1.0",
+    "vitepress": "^1.0.0"
+  }
+}

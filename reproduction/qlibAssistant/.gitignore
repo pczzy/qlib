@@ -1,0 +1,15 @@
+qlib_score_csv/
+review_csv/
+.vscode/
+**/__pycache__/
+roll/home
+
+# --- VitePress (page) ---
+page/node_modules/
+page/docs/.vitepress/dist/
+page/docs/.vitepress/cache/
+# 以下由 gen_page 生成，部署时自动构建
+page/docs/index.md
+page/docs/score/
+/.idea
+.DS_Store

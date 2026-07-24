@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>Qlib · Model Observatory</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="noise"></div>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark"><i></i><i></i><i></i></span>
+      <span>QLIB <b>OBSERVATORY</b></span>
+    </a>
+    <div class="top-actions">
+      <span class="live"><i></i> LIVE DATA</span>
+      <span id="clock">--:--:--</span>
+      <button id="refresh" aria-label="刷新数据">刷新</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">AUTOMATED QUANT RESEARCH / CSI 300</p>
+        <h1>模型工作成果<span>一眼掌握。</span></h1>
+        <p class="lede">从数据发布、模型审计到组合信号，追踪自动训练链路的每一个有效产出。</p>
+      </div>
+      <div class="hero-date">
+        <span>最新预测交易日</span>
+        <strong id="predictionDate">—</strong>
+        <small id="updatedAt">等待数据</small>
+      </div>
+    </section>
+
+    <section class="kpis" id="kpis"></section>
+
+    <section class="freshness panel">
+      <div class="panel-head">
+        <div><span class="section-no">DATA</span><h2>数据与训练周期</h2></div>
+        <span id="fetchStatus" class="status-pill">—</span>
+      </div>
+      <div class="freshness-meta">
+        <div><label>GitHub 最新抓取 Release</label><a id="releaseTag" href="#" target="_blank" rel="noreferrer">—</a></div>
+        <div><label>Release 发布时间</label><strong id="releasePublished">—</strong></div>
+        <div><label>本地交易日历覆盖至</label><strong id="calendarEnd">—</strong></div>
+      </div>
+      <div class="source-composition">
+        <div class="source-summary">
+          <div class="source-card github-source">
+            <span class="source-mark">GH</span>
+            <div><label>GitHub 基线数据</label><strong id="githubDataEnd">—</strong><small id="githubDataDays">—</small></div>
+          </div>
+          <div class="source-arrow">→</div>
+          <div class="source-card sina-source">
+            <span class="source-mark">SI</span>
+            <div><label>Sina 自动增量</label><strong id="sinaDataRange">—</strong><small id="sinaDataDays">—</small></div>
+          </div>
+        </div>
+        <div class="source-days-wrap">
+          <label>Sina 自动补齐交易日</label>
+          <div id="sinaDates" class="source-days"><span class="empty-source">当前无新浪补充</span></div>
+        </div>
+      </div>
+      <div class="table-wrap period-table">
+        <table>
+          <thead><tr><th>回溯周期</th><th>TRAIN</th><th>VALID</th><th>TEST</th></tr></thead>
+          <tbody id="periodRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="panel span-7">
+        <div class="panel-head">
+          <div><span class="section-no">01</span><h2>模型表现矩阵</h2></div>
+          <div class="legend"><span><i class="dot mint"></i>Rank IC</span><span><i class="dot amber"></i>IC</span></div>
+        </div>
+        <div id="metricChart" class="chart"></div>
+        <div id="metricSummary" class="metric-summary"></div>
+      </article>
+
+      <article class="panel span-5">
+        <div class="panel-head">
+          <div><span class="section-no">02</span><h2>组合权重</h2></div>
+          <span class="tag" id="weightSum">Σ —</span>
+        </div>
+        <div id="weights" class="weights"></div>
+      </article>
+
+      <article class="panel span-8">
+        <div class="panel-head">
+          <div><span class="section-no">03</span><h2>稳健信号精选</h2></div>
+          <div class="tabs">
+            <button class="tab active" data-table="filtered">过滤后</button>
+            <button class="tab" data-table="unfiltered">原始信号</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>证券</th><th>代码</th><th>综合分</th><th>正向共识</th><th>20日动量</th><th>波动率</th></tr></thead>
+            <tbody id="stockRows"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel span-4 lineage">
+        <div class="panel-head">
+          <div><span class="section-no">04</span><h2>数据血缘</h2></div>
+          <span id="lineageStatus" class="status-pill">—</span>
+        </div>
+        <div class="timeline">
+          <div><i></i><span>模型训练截止</span><strong id="trainEnd">—</strong></div>
+          <div><i></i><span>模型测试截止</span><strong id="testEnd">—</strong></div>
+          <div><i></i><span>当前数据截止</span><strong id="dataEnd">—</strong></div>
+        </div>
+        <div class="hashes">
+          <label>模型数据包 <code id="modelHash">—</code></label>
+          <label>当前数据包 <code id="currentHash">—</code></label>
+        </div>
+      </article>
+
+      <article class="panel span-12">
+        <div class="panel-head">
+          <div><span class="section-no">05</span><h2>历史预测复盘</h2></div>
+          <div class="tabs" id="reviewTabs">
+            <button class="tab active" data-review-kind="filtered">过滤后</button>
+            <button class="tab" data-review-kind="unfiltered">原始信号</button>
+          </div>
+        </div>
+        <p class="review-note" id="reviewDefinition"></p>
+        <div class="review-kpis" id="reviewKpis"></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>预测日</th><th>结果日</th><th>组合</th><th>样本</th><th>个股胜率</th><th>平均收益</th><th>沪深300</th><th>超额收益</th><th>状态</th></tr></thead>
+            <tbody id="reviewRows"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel span-12">
+        <div class="panel-head">
+          <div><span class="section-no">06</span><h2>流水线事件</h2></div>
+          <span class="tag">最近一次运行</span>
+        </div>
+        <div class="events" id="events"></div>
+      </article>
+    </section>
+  </main>
+
+  <footer><span>QLIB REPRODUCTION LAB</span><span>仅用于研究与技术验证 · 非投资建议</span></footer>
+  <div id="toast" role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
